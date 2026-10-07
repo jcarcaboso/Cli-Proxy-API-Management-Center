@@ -37,6 +37,9 @@ export type ClaudeQuotaData = {
   planType?: string | null;
 };
 
+const FABLE_WINDOW_ID = 'seven-day-fable';
+const FABLE_RATE_LIMIT_TIER_PATTERN = /max_20x/i;
+
 const findFableUsageLimit = (payload: ClaudeUsagePayload) => {
   if (!Array.isArray(payload.limits)) return null;
 
@@ -83,7 +86,7 @@ export const buildClaudeQuotaWindows = (
     const usedPercent = normalizeNumberValue(fableLimit.percent);
     if (usedPercent !== null) {
       windows.push({
-        id: 'seven-day-fable',
+        id: FABLE_WINDOW_ID,
         label: t('claude_quota.seven_day_fable'),
         labelKey: 'claude_quota.seven_day_fable',
         usedPercent,
@@ -97,6 +100,21 @@ export const buildClaudeQuotaWindows = (
   }
 
   return windows;
+};
+
+/**
+ * Fable is only offered on the top Claude tier (Max 20x). Lower tiers still
+ * receive a Fable window in the usage payload, pinned at 0%, which reads as a
+ * full unused quota. Keep the row only when the account is on that tier or has
+ * actually spent Fable quota.
+ */
+export const filterUnavailableFableWindow = (
+  windows: ClaudeQuotaWindow[],
+  profile: ClaudeProfileResponse | null
+): ClaudeQuotaWindow[] => {
+  const tier = normalizeStringValue(profile?.organization?.rate_limit_tier) ?? '';
+  if (FABLE_RATE_LIMIT_TIER_PATTERN.test(tier)) return windows;
+  return windows.filter((window) => window.id !== FABLE_WINDOW_ID || (window.usedPercent ?? 0) > 0);
 };
 
 const normalizeFlagValue = (value: unknown): boolean | undefined => {
@@ -191,15 +209,14 @@ const fetchClaudeQuota = async (file: AuthFileItem, t: TFunction): Promise<Claud
     throw new Error(t('claude_quota.empty_windows'));
   }
 
-  const windows = buildClaudeQuotaWindows(payload, t);
-  const planType =
+  const profile =
     profileResult.status === 'fulfilled' &&
     profileResult.value.statusCode >= 200 &&
     profileResult.value.statusCode < 300
-      ? resolveClaudePlanType(
-          parseClaudeProfilePayload(profileResult.value.body ?? profileResult.value.bodyText)
-        )
+      ? parseClaudeProfilePayload(profileResult.value.body ?? profileResult.value.bodyText)
       : null;
+  const windows = filterUnavailableFableWindow(buildClaudeQuotaWindows(payload, t), profile);
+  const planType = resolveClaudePlanType(profile);
 
   return { windows, extraUsage: payload.extra_usage, planType };
 };

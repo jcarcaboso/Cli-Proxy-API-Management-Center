@@ -12,6 +12,7 @@ import {
   PREMIUM_CODEX_PLAN_TYPES,
   buildResetDisplay,
   formatInstantShort,
+  formatRelativeInstant,
   parseIsoToMs,
   resolveResetMs,
 } from '@/utils/quota';
@@ -49,6 +50,7 @@ export function CodexQuotaBody({ quota, classes }: QuotaBodyProps<CodexQuotaStat
   const rateLimitResetCreditsAvailableCount = quota.rateLimitResetCreditsAvailableCount ?? null;
   const rateLimitResetCredits = quota.rateLimitResetCredits ?? [];
   const rateLimitResetCreditsError = quota.rateLimitResetCreditsError ?? '';
+  const cachedAt = typeof quota.cachedAt === 'number' ? quota.cachedAt : null;
 
   const getPlanLabel = (pt?: string | null): string | null => {
     const normalized = normalizePlanType(pt);
@@ -84,6 +86,14 @@ export function CodexQuotaBody({ quota, classes }: QuotaBodyProps<CodexQuotaStat
 
   return (
     <>
+      {cachedAt !== null && (
+        <div className={classes.codexResetCreditsError} role="status">
+          {t('codex_quota.cached_notice', {
+            age: formatRelativeInstant(cachedAt, now, locale),
+            message: quota.cacheError || t('common.unknown_error'),
+          })}
+        </div>
+      )}
       {(planLabel ||
         expiryDisplay ||
         creditsUnlimited ||

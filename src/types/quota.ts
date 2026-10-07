@@ -250,6 +250,9 @@ export interface CodexQuotaState {
   rateLimitResetCreditsApplicableAvailableCount?: number | null;
   rateLimitResetCredits?: CodexRateLimitResetCredit[];
   rateLimitResetCreditsError?: string;
+  /** Set when the live read failed and a trusted earlier snapshot is shown. */
+  cachedAt?: number | null;
+  cacheError?: string;
   error?: string;
   errorStatus?: number;
 }

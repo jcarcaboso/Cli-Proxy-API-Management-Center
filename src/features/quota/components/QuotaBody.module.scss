@@ -63,6 +63,8 @@
    warning-coloured when this is the row that recovers first). */
 .quotaResetRelative {
   color: var(--text-tertiary);
+  /* Keeps live countdown digits from shifting the row every second. */
+  font-variant-numeric: tabular-nums;
 
   &::before {
     content: '·';

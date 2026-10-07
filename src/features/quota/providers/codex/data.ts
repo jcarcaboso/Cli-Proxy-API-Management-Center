@@ -34,6 +34,8 @@ import {
   resolveCodexSubscriptionActiveUntil,
   formatCodexResetLabel,
   createStatusError,
+  createQuotaFallbackCache,
+  getStatusFromError,
   isCodexFile,
   isDisabledAuthFile,
 } from '@/utils/quota';
@@ -41,6 +43,7 @@ import { normalizeAuthIndex } from '@/utils/authIndex';
 import type { QuotaProviderData } from '../types';
 
 const CODEX_OPTIONAL_REQUEST_TIMEOUT_MS = 8000;
+const CODEX_USAGE_RETRY_DELAY_MS = 750;
 
 type CodexResetCreditsData = {
   availableCount: number | null;
@@ -59,7 +62,19 @@ export type CodexQuotaData = {
   rateLimitResetCredits: CodexRateLimitResetCredit[];
   rateLimitResetCreditsError: string;
   windows: CodexQuotaWindow[];
+  /** Set when a live read failed and a trusted earlier snapshot is shown instead. */
+  cachedAt?: number | null;
+  cacheError?: string;
 };
+
+/** Last-known-good usage per credential; see utils/quota/fallbackCache. */
+export const codexQuotaCache = createQuotaFallbackCache<CodexQuotaData>();
+
+/** Credential errors must surface immediately instead of hiding behind a snapshot. */
+const CODEX_NO_FALLBACK_STATUSES = new Set([401, 403]);
+
+const isRetryableUsageStatus = (status: number): boolean =>
+  status === 0 || status === 408 || status === 429 || status >= 500;
 
 export const buildCodexQuotaWindows = (
   payload: CodexUsagePayload,
@@ -413,25 +428,38 @@ const fetchCodexResetCredits = async (
   }
 };
 
-const fetchCodexQuota = async (file: AuthFileItem, t: TFunction): Promise<CodexQuotaData> => {
-  const rawAuthIndex = file['auth_index'] ?? file.authIndex;
-  const authIndex = normalizeAuthIndex(rawAuthIndex);
-  if (!authIndex) {
-    throw new Error(t('codex_quota.missing_auth_index'));
+const requestCodexUsage = async (authIndex: string, requestHeader: Record<string, string>) => {
+  const request = () =>
+    apiCallApi.request({
+      authIndex,
+      method: 'GET',
+      url: CODEX_USAGE_URL,
+      header: requestHeader,
+    });
+  // The usage endpoint fails intermittently; one delayed retry absorbs most of it.
+  try {
+    const result = await request();
+    if (!isRetryableUsageStatus(result.statusCode)) return result;
+  } catch (err: unknown) {
+    const status = getStatusFromError(err);
+    if (status !== undefined && !isRetryableUsageStatus(status)) throw err;
   }
+  await new Promise((resolve) => setTimeout(resolve, CODEX_USAGE_RETRY_DELAY_MS));
+  return request();
+};
 
+const fetchLiveCodexQuota = async (
+  file: AuthFileItem,
+  authIndex: string,
+  t: TFunction
+): Promise<CodexQuotaData> => {
   const planTypeFromFile = resolveCodexPlanType(file);
   const subscriptionActiveUntilFromFile = resolveCodexSubscriptionActiveUntil(file);
   const accountId = resolveCodexChatgptAccountId(file);
   const requestHeader = buildCodexRequestHeader(file);
 
   const [result, liveSubscriptionActiveUntil] = await Promise.all([
-    apiCallApi.request({
-      authIndex,
-      method: 'GET',
-      url: CODEX_USAGE_URL,
-      header: requestHeader,
-    }),
+    requestCodexUsage(authIndex, requestHeader),
     fetchCodexSubscriptionActiveUntil(authIndex, accountId, requestHeader),
   ]);
 
@@ -475,6 +503,34 @@ const fetchCodexQuota = async (file: AuthFileItem, t: TFunction): Promise<CodexQ
   };
 };
 
+const fetchCodexQuota = async (file: AuthFileItem, t: TFunction): Promise<CodexQuotaData> => {
+  const rawAuthIndex = file['auth_index'] ?? file.authIndex;
+  const authIndex = normalizeAuthIndex(rawAuthIndex);
+  if (!authIndex) {
+    throw new Error(t('codex_quota.missing_auth_index'));
+  }
+
+  const cacheKey = `${file.name}\0${authIndex}`;
+  const generation = codexQuotaCache.capture(file.name);
+  try {
+    const data = await fetchLiveCodexQuota(file, authIndex, t);
+    codexQuotaCache.store(cacheKey, file.name, data, generation);
+    return data;
+  } catch (err: unknown) {
+    const status = getStatusFromError(err);
+    const snapshot =
+      status !== undefined && CODEX_NO_FALLBACK_STATUSES.has(status)
+        ? null
+        : codexQuotaCache.read(cacheKey);
+    if (!snapshot) throw err;
+    return {
+      ...snapshot.data,
+      cachedAt: snapshot.savedAt,
+      cacheError: err instanceof Error ? err.message : t('common.unknown_error'),
+    };
+  }
+};
+
 const createCodexRedeemRequestId = (): string => {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -515,6 +571,8 @@ const consumeCodexRateLimitResetCredit = async (
 };
 
 const resetCodexQuota = async (file: AuthFileItem, t: TFunction): Promise<CodexQuotaData> => {
+  // Redeeming a credit resets usage, so the pre-reset snapshot is no longer a valid fallback.
+  codexQuotaCache.invalidateFiles([file.name]);
   await consumeCodexRateLimitResetCredit(file, t);
   return fetchCodexQuota(file, t);
 };
@@ -546,6 +604,8 @@ export const CODEX_CONFIG: QuotaProviderData<CodexQuotaState, CodexQuotaData> = 
       data.rateLimitResetCreditsApplicableAvailableCount,
     rateLimitResetCredits: data.rateLimitResetCredits,
     rateLimitResetCreditsError: data.rateLimitResetCreditsError,
+    cachedAt: data.cachedAt ?? null,
+    cacheError: data.cacheError,
   }),
   buildErrorState: (message, status) => ({
     status: 'error',

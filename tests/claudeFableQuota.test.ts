@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { TFunction } from 'i18next';
-import { buildClaudeQuotaWindows } from '@/features/quota/providers/claude/data';
+import {
+  buildClaudeQuotaWindows,
+  filterUnavailableFableWindow,
+} from '@/features/quota/providers/claude/data';
 import type { ClaudeUsagePayload } from '@/types';
 import { formatQuotaResetTime } from '@/utils/quota';
 
@@ -185,5 +188,35 @@ describe('Claude Fable quota', () => {
       { id: 'five-hour', usedPercent: 10 },
       { id: 'seven-day', usedPercent: 20 },
     ]);
+  });
+});
+
+describe('Claude Fable availability', () => {
+  const fableWindow = (usedPercent: number | null) => ({
+    id: 'seven-day-fable',
+    label: 'claude_quota.seven_day_fable',
+    usedPercent,
+    resetLabel: '-',
+  });
+  const weekly = {
+    id: 'seven-day',
+    label: 'claude_quota.seven_day',
+    usedPercent: 0,
+    resetLabel: '-',
+  };
+
+  test('hides an unused Fable window below the Max 20x tier', () => {
+    const profile = { organization: { rate_limit_tier: 'default_claude_max_5x' } };
+    expect(filterUnavailableFableWindow([weekly, fableWindow(0)], profile)).toEqual([weekly]);
+    expect(filterUnavailableFableWindow([weekly, fableWindow(null)], null)).toEqual([weekly]);
+  });
+
+  test('keeps the Fable window on the Max 20x tier even when unused', () => {
+    const profile = { organization: { rate_limit_tier: 'default_claude_max_20x' } };
+    expect(filterUnavailableFableWindow([weekly, fableWindow(0)], profile)).toHaveLength(2);
+  });
+
+  test('keeps a Fable window that has recorded usage', () => {
+    expect(filterUnavailableFableWindow([fableWindow(12)], null)).toEqual([fableWindow(12)]);
   });
 });

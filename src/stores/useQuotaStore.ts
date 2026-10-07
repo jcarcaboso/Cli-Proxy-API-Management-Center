@@ -3,6 +3,7 @@
  */
 
 import { create } from 'zustand';
+import { invalidateQuotaFallbackCaches } from '@/utils/quota/fallbackCache';
 import { getQuotaCacheFileName } from '@/utils/quota/identity';
 import type {
   AntigravityQuotaState,
@@ -79,7 +80,9 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     set((state) => ({
       xaiQuota: resolveUpdater(updater, state.xaiQuota),
     })),
-  clearQuotaCache: (names) =>
+  clearQuotaCache: (names) => {
+    // Fallback snapshots must never outlive the cards they back.
+    invalidateQuotaFallbackCaches(names);
     set((state) => {
       if (names) {
         if (names.length === 0) return state;
@@ -119,7 +122,8 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         metaQuota: {},
         xaiQuota: {},
       };
-    }),
+    });
+  },
 }));
 
 export const captureQuotaCacheGeneration = (name?: string) => {

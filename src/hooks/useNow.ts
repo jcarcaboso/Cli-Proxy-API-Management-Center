@@ -1,9 +1,9 @@
 /**
- * Current instant, refreshed once a minute, from a clock shared app-wide.
+ * Current instant from a clock shared app-wide (once a minute by default).
  */
 
 import { useSyncExternalStore } from 'react';
-import { MINUTE_CLOCK } from '@/utils/time/sharedClock';
+import { MINUTE_CLOCK, type SharedClock } from '@/utils/time/sharedClock';
 
 const noopSubscribe = () => () => {};
 
@@ -23,11 +23,12 @@ const frozenSnapshot = () => FROZEN_NOW;
  * runs (rules of hooks) but subscribes to nothing and returns a frozen value.
  * Callers that only need `now` in one branch should gate here rather than
  * calling the hook conditionally.
+ * @param clock defaults to the minute clock; pass `SECOND_CLOCK` for live countdowns.
  */
-export function useNow(enabled = true): number {
+export function useNow(enabled = true, clock: SharedClock = MINUTE_CLOCK): number {
   return useSyncExternalStore(
-    enabled ? MINUTE_CLOCK.subscribe : noopSubscribe,
-    enabled ? MINUTE_CLOCK.getSnapshot : frozenSnapshot,
+    enabled ? clock.subscribe : noopSubscribe,
+    enabled ? clock.getSnapshot : frozenSnapshot,
     frozenSnapshot
   );
 }

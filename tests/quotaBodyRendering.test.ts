@@ -228,7 +228,7 @@ describe('KimiQuotaBody', () => {
 });
 
 describe('ClaudeQuotaBody', () => {
-  test('pairs each window reset with a countdown', () => {
+  test('pairs each window reset with a live countdown', () => {
     const quota: ClaudeQuotaState = {
       status: 'success',
       windows: [
@@ -254,7 +254,10 @@ describe('ClaudeQuotaBody', () => {
 
     expect(markup).toContain('08-02 17:00');
     expect(markup).toContain('08-06 04:00');
-    expect(markup).toMatch(/2 hours/);
-    expect(markup).toMatch(/4 days/);
+    // Exact countdowns, not the truncated relative phrase. The frozen render
+    // clock trails `now` slightly, so match the leading units only.
+    expect(markup).toMatch(/2h 00m \d{2}s/);
+    expect(markup).toMatch(/4d 00h 00m/);
+    expect(markup).not.toMatch(/2 hours/);
   });
 });

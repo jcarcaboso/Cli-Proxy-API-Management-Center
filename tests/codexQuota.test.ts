@@ -7,10 +7,12 @@ import {
 } from '@/features/quota/providers/codex/data';
 import type { CodexQuotaState, CodexUsagePayload } from '@/types';
 import { apiCallApi, type ApiCallRequest, type ApiCallResult } from '@/services/api';
+import { useQuotaStore } from '@/stores/useQuotaStore';
 import {
   CODEX_RATE_LIMIT_RESET_CREDITS_URL,
   CODEX_SUBSCRIPTION_URL,
   CODEX_USAGE_URL,
+  invalidateQuotaFallbackCaches,
   normalizeCodexResetCreditsPayload,
   parseCodexUsagePayload,
 } from '@/utils/quota';
@@ -224,5 +226,81 @@ describe('Codex live subscription renewal', () => {
     );
 
     expect(quota.subscriptionActiveUntil).toBe('2026-09-03T13:27:01Z');
+  });
+});
+
+describe('Codex usage fallback cache', () => {
+  const file = { name: 'codex-cache.json', type: 'codex', auth_index: 'codex:cache' };
+  const futureUsage = (usedPercent: number): CodexUsagePayload => ({
+    plan_type: 'pro',
+    rate_limit: {
+      allowed: true,
+      limit_reached: false,
+      primary_window: {
+        used_percent: usedPercent,
+        limit_window_seconds: 18000,
+        reset_at: Math.floor(Date.now() / 1000) + 3600,
+      },
+      secondary_window: null,
+    },
+  });
+  const mockUsage = (respond: () => ApiCallResult) => {
+    let usageCalls = 0;
+    apiCallApi.request = async (payload) => {
+      if (payload.url === CODEX_USAGE_URL) {
+        usageCalls += 1;
+        return respond();
+      }
+      if (payload.url === CODEX_RATE_LIMIT_RESET_CREDITS_URL) {
+        return result(200, { available_count: 0, credits: [] });
+      }
+      throw new Error(`Unexpected URL: ${payload.url}`);
+    };
+    return () => usageCalls;
+  };
+
+  afterEach(() => {
+    invalidateQuotaFallbackCaches();
+  });
+
+  test('retries a transient failure once before giving up', async () => {
+    let attempt = 0;
+    const usageCalls = mockUsage(() =>
+      attempt++ === 0 ? result(502) : result(200, futureUsage(5))
+    );
+    const data = await CODEX_CONFIG.fetchQuota(file, t);
+    expect(usageCalls()).toBe(2);
+    expect(data.cachedAt).toBeUndefined();
+    expect(data.windows[0]?.usedPercent).toBe(5);
+  });
+
+  test('serves the last good snapshot, marked as cached, when the live read fails', async () => {
+    mockUsage(() => result(200, futureUsage(30)));
+    await CODEX_CONFIG.fetchQuota(file, t);
+
+    mockUsage(() => result(503));
+    const data = await CODEX_CONFIG.fetchQuota(file, t);
+    const state = CODEX_CONFIG.buildSuccessState(data);
+    expect(state.windows[0]?.usedPercent).toBe(30);
+    expect(typeof state.cachedAt).toBe('number');
+    expect(state.cacheError).toContain('503');
+  });
+
+  test('does not hide credential errors behind a snapshot', async () => {
+    mockUsage(() => result(200, futureUsage(30)));
+    await CODEX_CONFIG.fetchQuota(file, t);
+
+    const usageCalls = mockUsage(() => result(401));
+    await expect(CODEX_CONFIG.fetchQuota(file, t)).rejects.toThrow();
+    expect(usageCalls()).toBe(1);
+  });
+
+  test('drops the snapshot when the quota store is cleared for that file', async () => {
+    mockUsage(() => result(200, futureUsage(30)));
+    await CODEX_CONFIG.fetchQuota(file, t);
+
+    useQuotaStore.getState().clearQuotaCache([file.name]);
+    mockUsage(() => result(503));
+    await expect(CODEX_CONFIG.fetchQuota(file, t)).rejects.toThrow();
   });
 });
