@@ -545,7 +545,8 @@
     "plan_free": "Free",
     "plan_pro": "Pro 200",
     "plan_prolite": "Pro 100",
-    "plan_business_premium": "Business Premium"
+    "plan_business_premium": "Business Premium",
+    "cached_notice": "Показаны кэшированные данные ({{age}}); обновление не удалось: {{message}}"
   },
   "devin_quota": {
     "daily": "Остаток на день",
@@ -1586,7 +1587,11 @@
     "weekday_wed": "Ср",
     "weekday_thu": "Чт",
     "weekday_fri": "Пт",
-    "weekday_sat": "Сб"
+    "weekday_sat": "Сб",
+    "countdown_days": "{{days}} д {{hours}} ч {{minutes}} мин",
+    "countdown_hours": "{{hours}} ч {{minutes}} мин {{seconds}} с",
+    "countdown_minutes": "{{minutes}} мин {{seconds}} с",
+    "countdown_due": "сброс сейчас"
   },
   "plugin_management": {
     "title": "Управление плагинами",

@@ -5,8 +5,9 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ClaudeQuotaState } from '@/types';
-import { buildResetDisplay } from '@/utils/quota';
+import { buildResetDisplay, formatCountdown } from '@/utils/quota';
 import { useNow } from '@/hooks/useNow';
+import { SECOND_CLOCK } from '@/utils/time/sharedClock';
 import { QuotaMeter } from '../../components/QuotaMeter';
 import { QuotaResetLabel } from '../../components/QuotaResetLabel';
 import { collectQuotaRowInstants, pickUrgentRowId } from '../../resetSchedule';
@@ -14,7 +15,8 @@ import type { QuotaBodyProps } from '../../types';
 
 export function ClaudeQuotaBody({ quota, classes }: QuotaBodyProps<ClaudeQuotaState>) {
   const { t, i18n } = useTranslation();
-  const now = useNow();
+  // Claude reports exact reset instants, so each row carries a live countdown.
+  const now = useNow(true, SECOND_CLOCK);
   const soonestRowId = useMemo(
     () => pickUrgentRowId(collectQuotaRowInstants('claude', quota), now),
     [quota, now]
@@ -49,12 +51,17 @@ export function ClaudeQuotaBody({ quota, classes }: QuotaBodyProps<ClaudeQuotaSt
             clampedUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedUsed));
           const percentLabel = remaining === null ? '--' : `${Math.round(remaining)}%`;
           const windowLabel = window.labelKey ? t(window.labelKey) : window.label;
-          const resetDisplay = buildResetDisplay(
+          const baseResetDisplay = buildResetDisplay(
             window.resetLabel,
             window.resetAtMs,
             now,
             i18n.resolvedLanguage
           );
+          const resetAtMs = window.resetAtMs;
+          const resetDisplay =
+            baseResetDisplay && typeof resetAtMs === 'number' && Number.isFinite(resetAtMs)
+              ? { ...baseResetDisplay, relative: formatCountdown(resetAtMs, now, t) }
+              : baseResetDisplay;
 
           const soon = window.id === soonestRowId;
 

@@ -14,7 +14,7 @@
  * injectable so tests never touch a real clock.
  */
 
-import { MINUTE_MS } from './durations';
+import { MINUTE_MS, SECOND_MS } from './durations';
 
 export interface SharedClock {
   subscribe(listener: () => void): () => void;
@@ -87,3 +87,6 @@ export function createSharedClock(options: SharedClockOptions = {}): TestableSha
 
 /** The app-wide minute clock. Import this rather than making another one. */
 export const MINUTE_CLOCK: SharedClock = createSharedClock();
+
+/** Per-second clock for live countdowns. Subscribe only where seconds are shown. */
+export const SECOND_CLOCK: SharedClock = createSharedClock({ intervalMs: SECOND_MS });
